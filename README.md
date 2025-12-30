@@ -74,7 +74,7 @@ write0 is a **100% client-side** app:
 
 ## 🚀 Getting Started
 
-You can test it out [here](https://writer.omarbadri.dev/).
+You can test it out [here](https://write.omarbadri.dev/).
 
 ### Local Development (Vite)
 
