@@ -17,6 +17,10 @@
   <strong>write0</strong> is a distraction-free markdown writing environment designed for the modern web — a <strong>100% client-side application</strong> (no backend, no databases, no API routes).
 </p>
 
+<p align="center">
+  Inspired by minimalist writing tools like <a href="https://ia.net/writer">iA Writer</a>, with a fully client-side, open-source implementation.
+</p>
+
 ---
 
 ## ✨ Features
@@ -119,6 +123,12 @@ npm run preview
 ## 🤝 Contributing
 
 Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for setup and guidelines.
+
+---
+
+## 🙏 Inspiration
+
+This project is inspired by minimalist writing tools like [iA Writer](https://ia.net/writer) — especially the focus on minimalism, clarity, and staying out of the way while you write.
 
 ---
 
