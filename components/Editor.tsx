@@ -749,6 +749,40 @@ export const Editor: React.FC<EditorProps> = ({
     onTyping();
     setToolbarState((prev) => ({ ...prev, visible: false }));
 
+    if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+
+      const textarea = e.currentTarget;
+      const selectionStart = textarea.selectionStart;
+      const selectionEnd = textarea.selectionEnd;
+      const indentation = '    ';
+      const nextCursor = selectionStart + indentation.length;
+      const nextContent =
+        content.substring(0, selectionStart) + indentation + content.substring(selectionEnd);
+
+      if (onPastedRangesChange && pastedRanges.length > 0) {
+        onPastedRangesChange(
+          calculateNewRanges(
+            pastedRanges,
+            selectionStart,
+            selectionEnd - selectionStart,
+            indentation.length,
+          ),
+        );
+      }
+
+      prevContentRef.current = nextContent;
+      selectionRef.current = { start: nextCursor, end: nextCursor };
+      onChange(nextContent);
+      setCursorOffset(nextCursor);
+      onCursorOffsetChange?.(nextCursor);
+
+      requestAnimationFrame(() => {
+        textareaRef.current?.setSelectionRange(nextCursor, nextCursor);
+      });
+      return;
+    }
+
     // Custom Undo/Redo
     if (e.ctrlKey || e.metaKey) {
       const key = e.key.toLowerCase();
