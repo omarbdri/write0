@@ -2,6 +2,9 @@ import React, { useState, useRef, useMemo, useCallback, useEffect, useLayoutEffe
 import { STYLE_RULES, StyleRule } from '../constants';
 import { PastedRange } from '../types';
 import { Eraser } from 'lucide-react';
+import { getTextChange, getPastedSegments, updatePastedRanges } from '../utils/editorUtils';
+
+const EMPTY_RANGES: PastedRange[] = [];
 
 interface EditorProps {
   content: string;
@@ -15,11 +18,6 @@ interface EditorProps {
   onPastedRangesChange?: (ranges: PastedRange[]) => void;
   highlightPastedText: boolean;
   onCursorOffsetChange?: (offset: number) => void;
-}
-
-// Check if position is in a pasted range
-function isPositionPasted(pos: number, ranges: PastedRange[]): boolean {
-  return ranges.some((r) => pos >= r.start && pos < r.end);
 }
 
 function toGlobalRegex(regex: RegExp): RegExp {
@@ -182,7 +180,7 @@ export const Editor: React.FC<EditorProps> = ({
   typewriterMode,
   styleCheck,
   isSplitMode,
-  pastedRanges = [],
+  pastedRanges = EMPTY_RANGES,
   onPastedRangesChange,
   highlightPastedText,
   onCursorOffsetChange,
@@ -201,7 +199,7 @@ export const Editor: React.FC<EditorProps> = ({
   // Track previous content to detect edits
   const prevContentRef = useRef(content);
   // Mark when a paste happens to avoid double-processing
-  const justPastedRef = useRef(false);
+  const pendingPasteRef = useRef<{ start: number; end: number } | null>(null);
 
   // State for the active suggestion card
   const [activeMatch, setActiveMatch] = useState<{
@@ -305,85 +303,22 @@ export const Editor: React.FC<EditorProps> = ({
       caretMeasurerRef.current = createCaretMeasurer();
     }
 
-    centerCaretInTextarea(textarea, caretMeasurerRef.current, pendingTypewriterCaretIndexRef.current);
+    centerCaretInTextarea(
+      textarea,
+      caretMeasurerRef.current,
+      pendingTypewriterCaretIndexRef.current,
+    );
     syncBackdropScroll();
   }, [content, typewriterMode, syncBackdropScroll]);
 
-  const calculateNewRanges = (
-    currentRanges: PastedRange[],
-    changeStart: number,
-    deletedLength: number,
-    insertedLength: number,
-  ): PastedRange[] => {
-    let newRanges = [...currentRanges];
-
-    // 1. Handle Deletions
-    if (deletedLength > 0) {
-      const deletionEnd = changeStart + deletedLength;
-      newRanges = newRanges
-        .map((range) => {
-          // Case A: Range is completely before deletion -> Unchanged
-          if (range.end <= changeStart) return range;
-
-          // Case B: Range is completely after deletion -> Shift left
-          if (range.start >= deletionEnd) {
-            return { ...range, start: range.start - deletedLength, end: range.end - deletedLength };
-          }
-
-          // Case C: Overlap/Inside
-          const overlapStart = Math.max(range.start, changeStart);
-          const overlapEnd = Math.min(range.end, deletionEnd);
-          const overlapLen = Math.max(0, overlapEnd - overlapStart);
-
-          if (overlapLen >= range.end - range.start) return null;
-
-          const mapPoint = (p: number) => {
-            if (p <= changeStart) return p;
-            if (p >= deletionEnd) return p - deletedLength;
-            return changeStart;
-          };
-
-          const nStart = mapPoint(range.start);
-          const nEnd = mapPoint(range.end);
-
-          if (nEnd <= nStart) return null;
-
-          return { start: nStart, end: nEnd };
-        })
-        .filter((r): r is PastedRange => r !== null);
-    }
-
-    // 2. Handle Insertions
-    if (insertedLength > 0) {
-      newRanges = newRanges.flatMap((range) => {
-        // Case A: Insert after range -> Unchanged
-        if (changeStart >= range.end) return [range];
-
-        // Case B: Insert before range -> Shift right
-        if (changeStart <= range.start) {
-          return [
-            { ...range, start: range.start + insertedLength, end: range.end + insertedLength },
-          ];
-        }
-
-        // Case C: Insert strictly inside range -> Split
-        // range.start < changeStart < range.end
-        return [
-          { start: range.start, end: changeStart },
-          { start: changeStart + insertedLength, end: range.end + insertedLength },
-        ];
-      });
-    }
-
-    return newRanges;
-  };
-
   // --- History Management ---
+  const editKindRef = useRef<'typing' | 'change'>('change');
   const historyRef = useRef<{
     stack: Array<{
       content: string;
       ranges: PastedRange[];
       selection: { start: number; end: number };
+      kind: 'typing' | 'change';
     }>;
     currentIndex: number;
     lastEditTime: number;
@@ -412,6 +347,11 @@ export const Editor: React.FC<EditorProps> = ({
     }
 
     const currentHistory = historyRef.current;
+    if (
+      currentHistory.stack[currentHistory.currentIndex]?.content === content &&
+      currentHistory.stack[currentHistory.currentIndex]?.ranges === pastedRanges
+    )
+      return;
     const now = Date.now();
 
     // Determine if we should merge with the previous history entry
@@ -423,11 +363,23 @@ export const Editor: React.FC<EditorProps> = ({
     const prevEntry = currentHistory.stack[currentHistory.currentIndex];
 
     let shouldMerge = false;
-    if (prevEntry && currentHistory.currentIndex === currentHistory.stack.length - 1) {
+    if (
+      prevEntry &&
+      currentHistory.currentIndex > 0 &&
+      currentHistory.currentIndex === currentHistory.stack.length - 1
+    ) {
       const timeSince = now - currentHistory.lastEditTime;
-      const charDiff = Math.abs(content.length - prevEntry.content.length);
+      const change = getTextChange(prevEntry.content, content, selectionRef.current.start);
+      const charDiff = Math.max(change.deletedLength, change.insertedLength);
       // Merge if rapid typing (< 1s) and small change (<= 1 char)
-      if (timeSince < 1000 && charDiff <= 1) {
+      if (
+        timeSince < 1000 &&
+        charDiff === 1 &&
+        prevEntry.content !== content &&
+        prevEntry.kind === 'typing' &&
+        editKindRef.current === 'typing' &&
+        prevEntry.selection.start === prevEntry.selection.end
+      ) {
         shouldMerge = true;
       }
     }
@@ -436,7 +388,9 @@ export const Editor: React.FC<EditorProps> = ({
       content,
       ranges: pastedRanges,
       selection: selectionRef.current,
+      kind: editKindRef.current,
     };
+    editKindRef.current = 'change';
 
     if (shouldMerge) {
       currentHistory.stack[currentHistory.currentIndex] = newEntry;
@@ -450,11 +404,12 @@ export const Editor: React.FC<EditorProps> = ({
     }
 
     currentHistory.lastEditTime = now;
-  }, [content, pastedRanges]);
+  }, [content, pastedRanges, onCursorOffsetChange]);
 
   const performUndo = useCallback(() => {
     const history = historyRef.current;
     if (history.currentIndex > 0) {
+      history.lastEditTime = 0;
       isUndoingRef.current = true;
       history.currentIndex--;
       const prevState = history.stack[history.currentIndex];
@@ -469,6 +424,7 @@ export const Editor: React.FC<EditorProps> = ({
   const performRedo = useCallback(() => {
     const history = historyRef.current;
     if (history.currentIndex < history.stack.length - 1) {
+      history.lastEditTime = 0;
       isUndoingRef.current = true;
       history.currentIndex++;
       const nextState = history.stack[history.currentIndex];
@@ -504,40 +460,36 @@ export const Editor: React.FC<EditorProps> = ({
       const newContent = e.target.value;
       const newCursor = e.target.selectionStart;
 
-      const prevStart = selectionRef.current.start;
-      const prevEnd = selectionRef.current.end;
-      const deletedLength = prevEnd - prevStart;
-
-      const oldContent = prevContentRef.current;
-
-      let effectiveDeletedLength = deletedLength;
-      let effectiveInsertLength = newContent.length - (oldContent.length - deletedLength);
-      let effectiveChangePos = prevStart;
-
-      // Correction for simple deletion (Backspace/Delete) without selection range
-      if (effectiveInsertLength < 0) {
-        effectiveDeletedLength = -effectiveInsertLength; // The missing chars
-        effectiveInsertLength = 0;
-
-        // If newCursor is less than prevStart, we assume backspace
-        if (newCursor < prevStart) {
-          effectiveChangePos = newCursor;
-        } else {
-          effectiveChangePos = prevStart;
-        }
-      }
-
-      if (!justPastedRef.current && onPastedRangesChange && pastedRanges.length > 0) {
-        const nextRanges = calculateNewRanges(
+      const paste = pendingPasteRef.current;
+      const change = paste
+        ? {
+            start: paste.start,
+            deletedLength: paste.end - paste.start,
+            insertedLength:
+              newContent.length - prevContentRef.current.length + paste.end - paste.start,
+          }
+        : getTextChange(prevContentRef.current, newContent, newCursor);
+      const { start: effectiveChangePos, insertedLength: effectiveInsertLength } = change;
+      editKindRef.current =
+        !paste &&
+        Math.max(change.deletedLength, change.insertedLength) === 1 &&
+        !(change.deletedLength > 0 && change.insertedLength > 0)
+          ? 'typing'
+          : 'change';
+      if (onPastedRangesChange && (pastedRanges.length > 0 || pendingPasteRef.current)) {
+        const nextRanges = updatePastedRanges(
           pastedRanges,
-          effectiveChangePos,
-          effectiveDeletedLength,
-          effectiveInsertLength,
+          change.start,
+          change.deletedLength,
+          change.insertedLength,
         );
+        if (pendingPasteRef.current && change.insertedLength > 0) {
+          nextRanges.push({ start: change.start, end: change.start + change.insertedLength });
+          nextRanges.sort((a, b) => a.start - b.start);
+        }
         onPastedRangesChange(nextRanges);
       }
-
-      justPastedRef.current = false;
+      pendingPasteRef.current = null;
       prevContentRef.current = newContent;
 
       // Update selection ref to new cursor (collapsed)
@@ -560,110 +512,15 @@ export const Editor: React.FC<EditorProps> = ({
         }
       }
     },
-    [
-      onChange,
-      onTyping,
-      pastedRanges,
-      onPastedRangesChange,
-      onCursorOffsetChange,
-    ],
+    [onChange, onTyping, pastedRanges, onPastedRangesChange, onCursorOffsetChange],
   );
 
-  const handlePaste = useCallback(
-    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-      const pastedText = e.clipboardData.getData('text');
-      if (!pastedText || !onPastedRangesChange) return;
-
-      const textarea = textareaRef.current;
-      if (!textarea) return;
-
-      const selStart = textarea.selectionStart;
-      const selEnd = textarea.selectionEnd;
-      const selLen = selEnd - selStart;
-
-      let nextRanges = [...pastedRanges];
-
-      // 1. Delete Selection Phase
-      if (selLen > 0) {
-        nextRanges = nextRanges
-          .map((range) => {
-            if (range.end <= selStart) return range;
-            if (range.start >= selEnd)
-              return { ...range, start: range.start - selLen, end: range.end - selLen };
-
-            // Overlap
-            const overlapStart = Math.max(range.start, selStart);
-            const overlapEnd = Math.min(range.end, selEnd);
-            if (overlapEnd > overlapStart && overlapEnd - overlapStart >= range.end - range.start)
-              return null;
-
-            // Map bounds
-            const mapPoint = (p: number) => {
-              if (p <= selStart) return p;
-              if (p >= selEnd) return p - selLen;
-              return selStart;
-            };
-            const nStart = mapPoint(range.start);
-            const nEnd = mapPoint(range.end);
-
-            if (nEnd <= nStart) return null;
-            return { start: nStart, end: nEnd };
-          })
-          .filter((r): r is PastedRange => r !== null);
-      }
-
-      // 2. Insert Paste Phase
-      // Shift everything after selStart by pastedText.length
-      type RangeWithSplitMarker = PastedRange & { __split?: true };
-
-      const nextRangesWithMarker: RangeWithSplitMarker[] = nextRanges.map((range) => {
-        if (range.start >= selStart) {
-          return {
-            ...range,
-            start: range.start + pastedText.length,
-            end: range.end + pastedText.length,
-          };
-        }
-        // If range contains insertion point, split it
-        if (range.start < selStart && range.end > selStart) {
-          return { ...range, __split: true }; // Marker
-        }
-        return range;
-      });
-
-      // Handle updates and splits
-      const finalRanges: PastedRange[] = [];
-      for (const r of nextRangesWithMarker) {
-        if (r.__split) {
-          // Split it
-          finalRanges.push({ start: r.start, end: selStart });
-          finalRanges.push({ start: selStart + pastedText.length, end: r.end + pastedText.length });
-        } else {
-          finalRanges.push(r);
-        }
-      }
-
-      // Add the NEW pasted range
-      finalRanges.push({
-        start: selStart,
-        end: selStart + pastedText.length,
-      });
-
-      finalRanges.sort((a, b) => a.start - b.start);
-
-      justPastedRef.current = true;
-      prevContentRef.current =
-        content.substring(0, selStart) + pastedText + content.substring(selEnd);
-      selectionRef.current = {
-        start: selStart + pastedText.length,
-        end: selStart + pastedText.length,
-      };
-
-      onPastedRangesChange(finalRanges);
-      setToolbarState((prev) => ({ ...prev, visible: false }));
-    },
-    [pastedRanges, onPastedRangesChange, content],
-  );
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    // Wait for the native input event so ranges use the browser's normalized text.
+    pendingPasteRef.current = e.clipboardData.getData('text/plain')
+      ? { start: e.currentTarget.selectionStart, end: e.currentTarget.selectionEnd }
+      : null;
+  };
 
   const updateSelection = (e: React.SyntheticEvent<HTMLTextAreaElement>) => {
     const { selectionStart, selectionEnd } = e.currentTarget;
@@ -749,9 +606,12 @@ export const Editor: React.FC<EditorProps> = ({
     onTyping();
     setToolbarState((prev) => ({ ...prev, visible: false }));
 
-    if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (e.nativeEvent.isComposing) return;
+
+    if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
 
+      editKindRef.current = 'change';
       const textarea = e.currentTarget;
       const selectionStart = textarea.selectionStart;
       const selectionEnd = textarea.selectionEnd;
@@ -762,7 +622,7 @@ export const Editor: React.FC<EditorProps> = ({
 
       if (onPastedRangesChange && pastedRanges.length > 0) {
         onPastedRangesChange(
-          calculateNewRanges(
+          updatePastedRanges(
             pastedRanges,
             selectionStart,
             selectionEnd - selectionStart,
@@ -782,6 +642,11 @@ export const Editor: React.FC<EditorProps> = ({
       });
       return;
     }
+
+    selectionRef.current = {
+      start: e.currentTarget.selectionStart,
+      end: e.currentTarget.selectionEnd,
+    };
 
     // Custom Undo/Redo
     if (e.ctrlKey || e.metaKey) {
@@ -814,23 +679,11 @@ export const Editor: React.FC<EditorProps> = ({
 
   const renderStyledParagraph = useCallback(
     (text: string, paragraphStart: number) => {
-      if (!text) return <span className="whitespace-pre-wrap"> </span>;
+      if (!text) return null;
 
-      const segments: { text: string; isPasted: boolean }[] = [];
-      let pos = 0;
-
-      while (pos < text.length) {
-        const isPasted = isPositionPasted(paragraphStart + pos, pastedRanges);
-        let segEnd = pos + 1;
-        while (
-          segEnd < text.length &&
-          isPositionPasted(paragraphStart + segEnd, pastedRanges) === isPasted
-        ) {
-          segEnd++;
-        }
-        segments.push({ text: text.substring(pos, segEnd), isPasted });
-        pos = segEnd;
-      }
+      const segments = highlightPastedText
+        ? getPastedSegments(text, paragraphStart, pastedRanges)
+        : [{ text, isPasted: false }];
 
       return (
         <span className="whitespace-pre-wrap">
@@ -867,13 +720,13 @@ export const Editor: React.FC<EditorProps> = ({
           paraStart <= currentParagraphRange.end);
 
       return (
-        <div
+        <span
           key={i}
-          className={`min-h-[1.75rem] ${isFocused ? 'opacity-100' : 'opacity-25 transition-opacity duration-300'}`}
+          className={isFocused ? 'opacity-100' : 'opacity-25 transition-opacity duration-300'}
         >
           {renderStyledParagraph(para, paraStart)}
-          {i < paragraphs.length - 1 ? '\n' : ''}
-        </div>
+          {i < paragraphs.length - 1 ? '\n' : '\u200b'}
+        </span>
       );
     });
   }, [content, focusMode, currentParagraphRange, renderStyledParagraph]);
@@ -912,7 +765,7 @@ export const Editor: React.FC<EditorProps> = ({
           className="fixed z-50 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 p-1 animate-in fade-in zoom-in-95 duration-200"
           style={{
             left: Math.min(window.innerWidth - 150, Math.max(10, toolbarState.x - 60)) + 'px',
-            top: toolbarState.y - 50 + 'px',
+            top: Math.max(10, toolbarState.y - 50) + 'px',
           }}
           onMouseDown={(e) => e.preventDefault()} // Prevent stealing focus
         >

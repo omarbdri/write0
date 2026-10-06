@@ -21,11 +21,11 @@
 export function normalizeMarkdownForNestedLists(markdown: string): string {
   const lines = markdown.split(/\r?\n/);
 
-  let inFence = false;
+  let fence: { marker: string; length: number } | null = null;
+  let orderedIndent = 4;
   let lastNonEmptyWasTopLevelOrderedItem = false;
   let nestingBulletBlock = false;
 
-  const isFence = (line: string) => /^\s*```/.test(line);
   const isTopLevelOrderedItem = (line: string) => /^\d+\.\s+/.test(line);
   const isTopLevelBulletItem = (line: string) => /^[-*+]\s+/.test(line);
   const isAnyListLine = (line: string) => /^\s*(\d+\.|[-*+])\s+/.test(line);
@@ -35,17 +35,27 @@ export function normalizeMarkdownForNestedLists(markdown: string): string {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
-    if (isFence(line)) {
-      inFence = !inFence;
+    const fenceMatch = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (fence) {
+      if (
+        fenceMatch &&
+        fenceMatch[1][0] === fence.marker &&
+        fenceMatch[1].length >= fence.length &&
+        fenceMatch[2].trim() === ''
+      )
+        fence = null;
+      out.push(line);
+      continue;
+    }
+    if (fenceMatch) {
+      fence = { marker: fenceMatch[1][0], length: fenceMatch[1].length };
       nestingBulletBlock = false;
+      lastNonEmptyWasTopLevelOrderedItem = false;
       out.push(line);
       continue;
     }
 
-    if (inFence) {
-      out.push(line);
-      continue;
-    }
+    if (isTopLevelOrderedItem(line)) orderedIndent = Math.max(4, /^\d+\.\s+/.exec(line)![0].length);
 
     const trimmed = line.trim();
 
@@ -62,18 +72,20 @@ export function normalizeMarkdownForNestedLists(markdown: string): string {
       nestingBulletBlock = true;
     }
 
+    if (
+      nestingBulletBlock &&
+      trimmed &&
+      !isAnyListLine(line) &&
+      /^\S/.test(line) &&
+      (i === 0 || lines[i - 1].trim() === '')
+    ) {
+      nestingBulletBlock = false;
+      lastNonEmptyWasTopLevelOrderedItem = false;
+    }
+
     if (nestingBulletBlock) {
-      // Only indent truly top-level lines; preserve existing indentation.
-      if (/^\s*$/.test(line)) {
-        out.push('');
-      } else if (isAnyListLine(line) && /^\S/.test(line)) {
-        out.push(`    ${line}`);
-      } else if (/^\S/.test(line)) {
-        // Continuation lines within the bullet block (rare, but keeps them nested).
-        out.push(`    ${line}`);
-      } else {
-        out.push(line);
-      }
+      // Move the whole block, preserving child indentation relative to its parent.
+      out.push(trimmed === '' ? '' : `${' '.repeat(orderedIndent)}${line}`);
 
       // If we hit a non-list, non-empty line at top level, stop nesting.
       // This prevents accidentally nesting paragraphs unrelated to the list.

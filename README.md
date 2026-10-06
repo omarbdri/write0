@@ -82,7 +82,7 @@ You can test it out [here](https://write.omarbadri.dev/).
 
 ### Local Development (Vite)
 
-Install dependencies, then start the dev server:
+Use Node.js 22.12+ (22.x) or Node.js 24.x for development and tests. Install dependencies, then start the dev server:
 
 ```bash
 npm install
@@ -95,7 +95,10 @@ npm run dev
 npm run typecheck
 npm run lint
 npm run format:check
+npm test
 ```
+
+Regression tests cover document persistence, editor undo/redo and paste tracking, safe exports, and keyboard focus in dialogs.
 
 ### Production Build
 

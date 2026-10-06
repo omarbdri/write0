@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useDialogFocus } from '../hooks/useDialogFocus';
+import React, { useRef, useState } from 'react';
 import { X } from 'lucide-react';
 
 type ConfirmVariant = 'danger' | 'default';
@@ -25,26 +26,12 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
   onCancel,
 }) => {
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
-  const lastActiveElementRef = useRef<HTMLElement | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const [isBusy, setIsBusy] = useState(false);
 
-  useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onCancel();
-    };
-    if (!isOpen) return;
-
-    lastActiveElementRef.current = document.activeElement as HTMLElement | null;
-    cancelButtonRef.current?.focus();
-
-    window.addEventListener('keydown', handleEsc);
-    return () => {
-      window.removeEventListener('keydown', handleEsc);
-      lastActiveElementRef.current?.focus?.();
-      lastActiveElementRef.current = null;
-      setIsBusy(false);
-    };
-  }, [isOpen, onCancel]);
+  useDialogFocus(isOpen, dialogRef, cancelButtonRef, () => {
+    if (!isBusy) onCancel();
+  });
 
   if (!isOpen) return null;
 
@@ -76,6 +63,8 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
       <div
         className="bg-white dark:bg-neutral-900 rounded-2xl shadow-lg w-full max-w-md overflow-hidden relative animate-in zoom-in-95 duration-200 border border-gray-200 dark:border-gray-800"
         onClick={(e) => e.stopPropagation()}
+        ref={dialogRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-labelledby="w0-confirm-title"

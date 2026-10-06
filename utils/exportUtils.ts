@@ -1,5 +1,18 @@
-import { marked } from 'marked';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { normalizeMarkdownForNestedLists } from './markdownUtils';
+
+/** Use the same safe Markdown renderer as the preview, including GFM. */
+export function renderMarkdownHTML(content: string): string {
+  return renderToStaticMarkup(
+    createElement(ReactMarkdown, {
+      remarkPlugins: [remarkGfm],
+      children: normalizeMarkdownForNestedLists(content),
+    }),
+  );
+}
 
 function escapeHtml(text: string): string {
   return text
@@ -30,14 +43,15 @@ function downloadBlob(blob: Blob, filename: string): void {
     a.rel = 'noopener';
     a.click();
   } finally {
-    URL.revokeObjectURL(url);
+    // Keep the URL alive until the browser has started the download.
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 }
 
 /**
  * Builds a complete HTML document optimized for printing/PDF export.
  */
-const buildPrintHTML = (title: string, htmlContent: string): string => {
+export const buildPrintHTML = (title: string, htmlContent: string): string => {
   const escapedTitle = escapeHtml(title);
   return `
 <!DOCTYPE html>
@@ -230,10 +244,9 @@ ${htmlContent}
 </html>`;
 };
 
-export const exportToHTML = async (title: string, content: string) => {
+export const exportToHTML = (title: string, content: string) => {
   try {
-    const normalized = normalizeMarkdownForNestedLists(content);
-    const htmlContent = await marked.parse(normalized);
+    const htmlContent = renderMarkdownHTML(content);
     const html = buildPrintHTML(title, htmlContent);
     const fileBase = toSafeFilename(title, 'document');
     downloadBlob(new Blob([html], { type: 'text/html' }), `${fileBase}.html`);
@@ -253,25 +266,31 @@ export const exportToText = (title: string, content: string) => {
   }
 };
 
-export const exportToPDF = async (title: string, content: string) => {
+export const exportToPDF = (
+  title: string,
+  content: string,
+  printWindow: Window | null = window.open('', '_blank', 'width=800,height=600'),
+) => {
   try {
-    const normalized = normalizeMarkdownForNestedLists(content);
-    const htmlContent = await marked.parse(normalized);
+    const htmlContent = renderMarkdownHTML(content);
 
     // Build full HTML document with print-optimized styles
     const printHTML = buildPrintHTML(title, htmlContent);
 
     // Open in new window and trigger print dialog
-    const printWindow = window.open('', '_blank', 'width=800,height=600');
     if (!printWindow) {
       alert('Popup was blocked. Allow popups for this site to export PDF (Print).');
       return;
     }
 
+    printWindow.opener = null;
     printWindow.document.write(printHTML);
     printWindow.document.close();
 
+    let hasPrinted = false;
     const triggerPrint = () => {
+      if (hasPrinted || printWindow.closed) return;
+      hasPrinted = true;
       try {
         printWindow.focus();
         printWindow.print();
@@ -282,10 +301,9 @@ export const exportToPDF = async (title: string, content: string) => {
     };
 
     // Wait for content to load before printing
-    printWindow.onload = triggerPrint;
-
-    // Fallback for browsers that don't fire onload properly
-    window.setTimeout(triggerPrint, 250);
+    printWindow.addEventListener('load', triggerPrint, { once: true });
+    // document.close() may finish loading before the listener is installed.
+    if (printWindow.document.readyState === 'complete') triggerPrint();
   } catch (error) {
     console.error('Failed to export PDF:', error);
     alert('Export failed while generating PDF (Print). See console for details.');

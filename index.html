@@ -87,6 +87,8 @@
         height: 100%;
         box-sizing: border-box;
         overflow-y: auto;
+        scrollbar-gutter: stable;
+        tab-size: 4;
         white-space: pre-wrap;
         overflow-wrap: break-word;
       }
@@ -99,9 +101,9 @@
       /* Center content in editor when not in split mode */
       @media (min-width: 1024px) {
         .editor-layer:not(.split-mode) {
-          padding-left: calc(50% - 24rem);
+          padding-left: max(2rem, calc(50% - 24rem));
           /* 24rem is half of 48rem (3xl) */
-          padding-right: calc(50% - 24rem);
+          padding-right: max(2rem, calc(50% - 24rem));
         }
       }
 
@@ -161,24 +163,19 @@
         left: 0.25em;
       }
 
-      /* Ordered list markers (numbers) */
+      /* Native counters honor ordered-list start values and nested numbering. */
       .w0-prose ol {
-        counter-reset: w0-list-counter;
+        list-style: decimal;
+        padding-left: 1.75em;
       }
 
       .w0-prose ol > li {
-        counter-increment: w0-list-counter;
+        padding-left: 0.25em;
       }
 
-      .w0-prose ol > li::before {
-        content: counter(w0-list-counter) '.';
-        position: absolute;
-        font-weight: 600;
+      .w0-prose ol > li::marker {
         color: currentColor;
-        opacity: 0.7;
-        left: 0;
-        width: 1.25em;
-        text-align: right;
+        font-weight: 600;
       }
 
       .w0-prose h1 {

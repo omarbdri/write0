@@ -1,4 +1,5 @@
-import React, { useEffect, useRef } from 'react';
+import { useDialogFocus } from '../hooks/useDialogFocus';
+import React, { useRef } from 'react';
 import { X, Eye, Download, ClipboardPen, Layout, TextSearch, Columns } from 'lucide-react';
 
 interface HelpModalProps {
@@ -8,7 +9,7 @@ interface HelpModalProps {
 
 export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const lastActiveElementRef = useRef<HTMLElement | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   const builtBy: {
     name: string;
@@ -23,22 +24,7 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
     ],
   };
 
-  useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    if (!isOpen) return;
-
-    lastActiveElementRef.current = document.activeElement as HTMLElement | null;
-    closeButtonRef.current?.focus();
-
-    window.addEventListener('keydown', handleEsc);
-    return () => {
-      window.removeEventListener('keydown', handleEsc);
-      lastActiveElementRef.current?.focus?.();
-      lastActiveElementRef.current = null;
-    };
-  }, [isOpen, onClose]);
+  useDialogFocus(isOpen, dialogRef, closeButtonRef, onClose);
 
   if (!isOpen) return null;
 
@@ -46,8 +32,7 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
     {
       icon: <Layout className="text-blue-500" size={24} />,
       title: 'Distraction-Free Writing',
-      description:
-        'The UI fades away automatically while you type.',
+      description: 'The UI fades away automatically while you type.',
     },
     {
       icon: <ClipboardPen className="text-teal-500" size={24} />,
@@ -91,6 +76,8 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
       <div
         className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden relative animate-in zoom-in-95 duration-200 border border-gray-200 dark:border-gray-800"
         onClick={(e) => e.stopPropagation()}
+        ref={dialogRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-labelledby="w0-help-title"
@@ -117,10 +104,7 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
         <div className="p-6 overflow-y-auto max-h-[70vh]">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {features.map((feature, index) => (
-              <div
-                key={index}
-                className="flex gap-4 p-2 rounded-lg"
-              >
+              <div key={index} className="flex gap-4 p-2 rounded-lg">
                 <div className="flex-shrink-0 mt-1">{feature.icon}</div>
                 <div>
                   <h3 className="font-semibold text-gray-900 dark:text-gray-100">

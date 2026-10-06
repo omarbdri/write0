@@ -19,11 +19,13 @@ import {
 import { Tooltip } from './components/Tooltip';
 import { HelpModal } from './components/HelpModal';
 import { ConfirmModal } from './components/ConfirmModal';
-import { exportToHTML, exportToText, exportToPDF } from './utils/exportUtils';
-import { readJson, writeJson, STORAGE_KEYS } from './utils/storageUtils';
+import { readJson, writeJson, STORAGE_KEYS, StorageKey } from './utils/storageUtils';
+import { restoreDocuments, restoreSettings } from './utils/stateUtils';
+import { usePersistentStorage } from './hooks/usePersistentStorage';
 
 const App: React.FC = () => {
-  const hasShownStorageErrorRef = useRef(false);
+  const [storageErrors, setStorageErrors] = useState<Partial<Record<StorageKey, string>>>({});
+  const storageError = Object.values(storageErrors).find(Boolean);
 
   // --- State ---
   const [documents, setDocuments] = useState<Document[]>(() => {
@@ -37,8 +39,7 @@ const App: React.FC = () => {
       },
     ];
 
-    const saved = readJson<Document[]>(STORAGE_KEYS.documents, fallback);
-    return Array.isArray(saved) && saved.length > 0 ? saved : fallback;
+    return restoreDocuments(readJson<unknown>(STORAGE_KEYS.documents, fallback), fallback);
   });
 
   const [activeDocId, setActiveDocId] = useState<string>(() => {
@@ -46,27 +47,17 @@ const App: React.FC = () => {
   });
 
   const [settings, setSettings] = useState<AppSettings>(() => {
-    const fallback: AppSettings = {
-      theme: 'light',
-      focusMode: false,
-      typewriterMode: false,
-      styleCheck: false,
-      showPreview: false,
-      showSidebar: true,
-      highlightPastedText: true,
-    };
-
-    return readJson<AppSettings>(STORAGE_KEYS.settings, fallback);
+    return restoreSettings(readJson<unknown>(STORAGE_KEYS.settings, null));
   });
 
   // Distraction free typing state
   const [isTyping, setIsTyping] = useState(false);
   const typingTimeoutRef = useRef<number | null>(null);
-  const isTypingRef = useRef(false);
 
   // Export menu state
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
+  const exportButtonRef = useRef<HTMLButtonElement>(null);
 
   // Help Modal state
   const [showHelp, setShowHelp] = useState(false);
@@ -120,73 +111,43 @@ const App: React.FC = () => {
   }, []);
 
   // --- Effects ---
-  useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      const result = writeJson(STORAGE_KEYS.documents, documents);
-      if (result.ok === false) {
-        if (hasShownStorageErrorRef.current) return;
+  const handleSaveResult = useCallback((result: ReturnType<typeof writeJson>, key: StorageKey) => {
+    const message =
+      result.ok === false
+        ? result.reason === 'quota'
+          ? 'Browser storage is full. Your latest changes are not saved. Export your writing before leaving.'
+          : 'Browser storage is unavailable. Your latest changes are not saved. Export your writing before leaving.'
+        : undefined;
+    setStorageErrors((previous) => {
+      if (previous[key] === message) return previous;
+      return { ...previous, [key]: message };
+    });
+  }, []);
 
-        hasShownStorageErrorRef.current = true;
-        console.warn('Failed to persist documents to localStorage:', result.reason);
-        if (result.reason === 'quota') {
-          alert(
-            'write0 could not save because browser storage is full. Consider deleting old documents or freeing up site data.',
-          );
-        }
-      }
-    }, 250);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [documents]);
+  usePersistentStorage(STORAGE_KEYS.documents, documents, handleSaveResult);
+  usePersistentStorage(STORAGE_KEYS.activeDocumentId, activeDocId, handleSaveResult);
+  usePersistentStorage(STORAGE_KEYS.settings, settings, handleSaveResult);
 
   useEffect(() => {
-    const result = writeJson(STORAGE_KEYS.activeDocumentId, activeDocId);
-    if (result.ok === false) {
-      console.warn('Failed to persist active document id to localStorage:', result.reason);
-    }
-  }, [activeDocId]);
-
-  useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      const result = writeJson(STORAGE_KEYS.settings, settings);
-      if (result.ok === false) {
-        if (hasShownStorageErrorRef.current) return;
-
-        hasShownStorageErrorRef.current = true;
-        console.warn('Failed to persist settings to localStorage:', result.reason);
-        if (result.reason === 'quota') {
-          alert('write0 could not save settings because browser storage is full.');
-        }
-      }
-    }, 250);
-
-    if (settings.theme === 'dark') {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-
-    return () => window.clearTimeout(timeoutId);
-  }, [settings]);
-
-  useEffect(() => {
-    isTypingRef.current = isTyping;
-  }, [isTyping]);
+    document.documentElement.classList.toggle('dark', settings.theme === 'dark');
+  }, [settings.theme]);
 
   // Handle typing detection to fade UI
   useEffect(() => {
-    const handleMouseMove = () => {
-      if (!isTypingRef.current) return;
-
+    const revealControls = () => {
       setIsTyping(false);
       if (typingTimeoutRef.current) {
         window.clearTimeout(typingTimeoutRef.current);
       }
     };
 
-    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('pointermove', revealControls);
+    window.addEventListener('pointerdown', revealControls);
+    window.addEventListener('focusin', revealControls);
     return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('pointermove', revealControls);
+      window.removeEventListener('pointerdown', revealControls);
+      window.removeEventListener('focusin', revealControls);
       if (typingTimeoutRef.current) window.clearTimeout(typingTimeoutRef.current);
     };
   }, []);
@@ -194,7 +155,13 @@ const App: React.FC = () => {
   // Handle keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+      if (
+        !showHelp &&
+        !deleteDocId &&
+        !e.isComposing &&
+        (e.ctrlKey || e.metaKey) &&
+        e.key.toLowerCase() === 'b'
+      ) {
         e.preventDefault();
         toggleSetting('showSidebar');
       }
@@ -202,7 +169,7 @@ const App: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [toggleSetting]);
+  }, [toggleSetting, showHelp, deleteDocId]);
 
   // Click outside to close export menu
   useEffect(() => {
@@ -212,11 +179,19 @@ const App: React.FC = () => {
       }
     };
 
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowExportMenu(false);
+        exportButtonRef.current?.focus();
+      }
+    };
     if (showExportMenu) {
-      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('pointerdown', handleClickOutside);
+      document.addEventListener('keydown', handleEscape);
     }
     return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('pointerdown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
     };
   }, [showExportMenu]);
 
@@ -272,7 +247,7 @@ const App: React.FC = () => {
 
   const handleCreateDoc = () => {
     const newDoc: Document = {
-      id: Date.now().toString(),
+      id: crypto.randomUUID(),
       title: 'Untitled',
       content: '',
       folderId: INITIAL_FOLDER_ID,
@@ -293,27 +268,37 @@ const App: React.FC = () => {
   const handleConfirmDeleteDoc = () => {
     if (!deleteDocId) return;
 
-    setDocuments((prev) => {
-      const nextDocs = prev.filter((d) => d.id !== deleteDocId);
-      if (activeDocId === deleteDocId) {
-        setActiveDocId(nextDocs[0]?.id ?? activeDocId);
-      }
-      return nextDocs;
-    });
+    const nextDocs = documents.filter((doc) => doc.id !== deleteDocId);
+    setDocuments(nextDocs);
+    if (activeDocId === deleteDocId) setActiveDocId(nextDocs[0]?.id ?? '');
 
     setDeleteDocId(null);
   };
 
-  const handleExport = (type: 'html' | 'md' | 'pdf') => {
+  const handleExport = async (type: 'html' | 'md' | 'pdf') => {
     if (!activeDoc) return;
-    if (type === 'html') exportToHTML(activeDoc.title, activeDoc.content);
-    if (type === 'md') exportToText(activeDoc.title, activeDoc.content);
-    if (type === 'pdf') exportToPDF(activeDoc.title, activeDoc.content);
     setShowExportMenu(false);
+    // Reserve the print window during the click, before loading the export module.
+    const printWindow = type === 'pdf' ? window.open('', '_blank', 'width=800,height=600') : null;
+    if (type === 'pdf' && !printWindow) {
+      alert('Popup was blocked. Allow popups for this site to export PDF (Print).');
+      return;
+    }
+    if (printWindow) printWindow.opener = null;
+    try {
+      const { exportToHTML, exportToText, exportToPDF } = await import('./utils/exportUtils');
+      if (type === 'html') exportToHTML(activeDoc.title, activeDoc.content);
+      if (type === 'md') exportToText(activeDoc.title, activeDoc.content);
+      if (type === 'pdf') exportToPDF(activeDoc.title, activeDoc.content, printWindow);
+    } catch (error) {
+      printWindow?.close();
+      console.error('Failed to load export tools:', error);
+      alert('Export could not load. Please try again.');
+    }
   };
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-dvh overflow-hidden">
       {/* Help Modal */}
       <HelpModal isOpen={showHelp} onClose={() => setShowHelp(false)} />
 
@@ -330,6 +315,7 @@ const App: React.FC = () => {
 
       {/* Sidebar - Fades out when typing */}
       <div
+        inert={showHelp || deleteDocId !== null}
         className={`flex-shrink-0 overflow-hidden transition-all duration-300 ease-in-out ${
           settings.showSidebar ? 'w-0 md:w-72' : 'w-0'
         } ${isTyping ? 'opacity-0 pointer-events-none delay-200' : 'opacity-100 delay-0'}`}
@@ -351,10 +337,14 @@ const App: React.FC = () => {
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0 bg-gray-50 dark:bg-gray-900 transition-all duration-300 relative">
+      <div
+        inert={showHelp || deleteDocId !== null}
+        className="flex-1 flex flex-col min-w-0 bg-gray-50 dark:bg-gray-900 transition-all duration-300 relative"
+      >
         {/* Top Bar - Fades out when typing */}
         <div
           className={`h-14 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between px-4 bg-white dark:bg-gray-900 z-20 flex-shrink-0 transition-opacity duration-700 ease-in-out ${isTyping ? 'opacity-0 pointer-events-none delay-200' : 'opacity-100 delay-0'}`}
+          onFocusCapture={() => setIsTyping(false)}
         >
           <div className="flex items-center gap-4">
             <Tooltip content="Toggle Sidebar" position="right">
@@ -387,9 +377,7 @@ const App: React.FC = () => {
                 onClick={() => toggleSetting('typewriterMode')}
                 className={`p-2 rounded-md transition-colors hidden sm:block ${settings.typewriterMode ? 'bg-teal-100 text-teal-700 dark:bg-teal-900 dark:text-teal-300' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 dark:text-gray-400'}`}
                 aria-label={
-                  settings.typewriterMode
-                    ? 'Disable typewriter mode'
-                    : 'Enable typewriter mode'
+                  settings.typewriterMode ? 'Disable typewriter mode' : 'Enable typewriter mode'
                 }
               >
                 <AlignCenter size={18} />
@@ -457,6 +445,10 @@ const App: React.FC = () => {
                 <button
                   onClick={() => setShowExportMenu(!showExportMenu)}
                   className={`p-2 transition-colors rounded-md ${showExportMenu ? 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 dark:text-gray-400'}`}
+                  ref={exportButtonRef}
+                  disabled={!activeDoc}
+                  aria-expanded={showExportMenu}
+                  aria-controls="export-options"
                   aria-label="Export"
                 >
                   <Share size={18} />
@@ -465,7 +457,10 @@ const App: React.FC = () => {
               {/* Add invisible padding-top to bridge the gap if needed, though now click-based */}
               {showExportMenu && (
                 <div className="absolute right-0 top-full pt-2 w-48 z-50 animate-in fade-in slide-in-from-top-1 duration-200">
-                  <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 p-1">
+                  <div
+                    id="export-options"
+                    className="bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 p-1"
+                  >
                     <button
                       onClick={() => handleExport('md')}
                       className="flex items-center gap-2 w-full px-4 py-2 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md"
@@ -491,14 +486,24 @@ const App: React.FC = () => {
           </div>
         </div>
 
+        {storageError && (
+          <div
+            role="alert"
+            className="px-4 py-2 text-sm bg-yellow-100 text-yellow-900 dark:bg-yellow-900 dark:text-yellow-100"
+          >
+            {storageError}
+          </div>
+        )}
+
         {/* Editor Area */}
         <div className="flex-1 flex overflow-hidden relative bg-gray-50 dark:bg-[#191919]">
           {activeDoc ? (
             <>
               <div
-                className={`h-full transition-all duration-300 relative ${settings.showPreview ? 'w-1/2 border-r border-gray-200 dark:border-gray-700' : 'w-full'}`}
+                className={`h-full transition-all duration-300 relative ${settings.showPreview ? 'w-full md:w-1/2 md:border-r border-gray-200 dark:border-gray-700' : 'w-full'}`}
               >
                 <Editor
+                  key={activeDoc.id}
                   content={activeDoc.content}
                   onChange={handleUpdateContent}
                   onTyping={handleTyping}
@@ -514,7 +519,11 @@ const App: React.FC = () => {
               </div>
               {settings.showPreview && (
                 <div className="w-1/2 h-full hidden md:block">
-                  <Preview content={activeDoc.content} focusMode={settings.focusMode} focusLine={focusLine} />
+                  <Preview
+                    content={activeDoc.content}
+                    focusMode={settings.focusMode}
+                    focusLine={focusLine}
+                  />
                 </div>
               )}
             </>
@@ -527,8 +536,8 @@ const App: React.FC = () => {
       </div>
 
       {/* Mobile Preview Overlay */}
-      {settings.showPreview && (
-        <div className="md:hidden fixed inset-0 z-50 bg-white dark:bg-gray-900 pt-14">
+      {settings.showPreview && activeDoc && (
+        <div className="md:hidden fixed inset-0 z-40 bg-white dark:bg-gray-900 pt-14">
           <div className="absolute top-0 left-0 right-0 h-14 border-b flex items-center justify-between px-4 bg-white dark:bg-gray-900">
             <span className="font-bold">Preview</span>
             <button onClick={() => toggleSetting('showPreview')}>Close</button>

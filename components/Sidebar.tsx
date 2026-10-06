@@ -73,15 +73,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <div
+      inert={!isOpen}
       className={`fixed inset-y-0 left-0 z-40 md:z-0 w-72 bg-white dark:bg-gray-900/95 backdrop-blur-sm border-r border-gray-200 dark:border-gray-800 flex flex-col transition-all duration-300 ease-in-out ${
         isOpen ? 'translate-x-0 opacity-100' : '-translate-x-full opacity-0'
       } md:static md:h-full md:shadow-none shadow-2xl`}
     >
       {/* Header */}
       <div className="h-14 px-4 border-b border-gray-200 dark:border-gray-800 flex justify-between items-center flex-shrink-0">
-        <h1 className="font-mono font-medium text-xl text-gray-800 dark:text-gray-100">
-          write0
-        </h1>
+        <h1 className="font-mono font-medium text-xl text-gray-800 dark:text-gray-100">write0</h1>
         <button
           onClick={onClose}
           className="md:hidden text-gray-500 hover:text-gray-800 dark:hover:text-white"
@@ -98,6 +97,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <input
             type="text"
             placeholder="Search..."
+            aria-label="Search documents"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-9 pr-4 py-2 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-neutral-300 dark:focus:ring-neutral-700 dark:text-neutral-100"
@@ -126,7 +126,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               onClick={() => onSelectDoc(doc.id)}
             >
               <div
-                className={`flex ${editingId === doc.id ? 'items-center' : 'items-start'} gap-3 overflow-hidden`}
+                className={`flex flex-1 min-w-0 ${editingId === doc.id ? 'items-center' : 'items-start'} gap-3 overflow-hidden`}
               >
                 <FileText
                   size={18}
@@ -138,6 +138,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   {editingId === doc.id ? (
                     <input
                       ref={editInputRef}
+                      aria-label="Document title"
                       value={editTitle}
                       onChange={(e) => setEditTitle(e.target.value)}
                       onBlur={handleSaveRename}
@@ -146,7 +147,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       className="text-sm font-medium bg-gray-100 dark:bg-gray-700 border-none focus:ring-0 focus:outline-none rounded px-1 py-0.5 w-full"
                     />
                   ) : (
-                    <>
+                    <button
+                      type="button"
+                      aria-current={activeDocId === doc.id ? 'page' : undefined}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSelectDoc(doc.id);
+                      }}
+                      className="flex flex-col min-w-0 text-left rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500"
+                    >
                       <span
                         className={`text-sm font-medium truncate ${activeDocId === doc.id ? 'text-gray-900 dark:text-gray-100' : 'text-gray-700 dark:text-gray-300'}`}
                       >
@@ -155,7 +164,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       <span className="text-xs text-gray-400 truncate">
                         {new Date(doc.updatedAt).toLocaleDateString()}
                       </span>
-                    </>
+                    </button>
                   )}
                 </div>
               </div>
@@ -164,19 +173,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   onMouseDown={(e) => {
                     if (editingId === doc.id) {
                       e.preventDefault();
-                      handleSaveRename();
                     }
                   }}
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (editingId !== doc.id) {
-                      handleStartRename(e, doc);
-                    }
+                    if (editingId === doc.id) handleSaveRename();
+                    else handleStartRename(e, doc);
                   }}
                   className={`${
                     editingId === doc.id
                       ? 'opacity-100 text-green-600 dark:text-green-400'
-                      : 'opacity-0 group-hover:opacity-100 text-gray-400 hover:text-blue-500'
+                      : 'opacity-100 md:opacity-0 md:group-hover:opacity-100 group-focus-within:opacity-100 text-gray-400 hover:text-blue-500'
                   } p-1.5 rounded transition-all`}
                   aria-label={editingId === doc.id ? 'Save document title' : 'Rename document'}
                 >
@@ -187,7 +194,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     e.stopPropagation();
                     onDeleteDoc(doc.id);
                   }}
-                  className="opacity-0 group-hover:opacity-100 p-1.5 text-gray-400 hover:text-red-500 rounded transition-all"
+                  className="opacity-100 md:opacity-0 md:group-hover:opacity-100 group-focus-within:opacity-100 p-1.5 text-gray-400 hover:text-red-500 rounded transition-all"
                   aria-label="Delete document"
                 >
                   <Trash2 size={14} />

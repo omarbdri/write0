@@ -4,6 +4,8 @@ Thanks for taking the time to contribute! write0 is a **100% client-side** app (
 
 ## Quick Start
 
+Use Node.js 22.12+ (22.x) or Node.js 24.x.
+
 ```bash
 npm install
 npm run dev
@@ -16,7 +18,9 @@ Run these before opening a PR:
 ```bash
 npm run typecheck
 npm run lint
-npm run format
+npm run format:check
+npm test
+npm run build
 ```
 
 ## Project Principles
