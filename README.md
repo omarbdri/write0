@@ -78,6 +78,8 @@ write0 is a **100% client-side** app:
 
 ## 🚀 Getting Started
 
+[![Launch on PicoRunner](https://picorunner.com/badges/launch.svg)](https://picorunner.com/launch/?repository=https%3A%2F%2Fgithub.com%2Fomarbdri%2Fwrite0)
+
 You can test it out [here](https://write.omarbadri.dev/).
 
 ### Local Development (Vite)
