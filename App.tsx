@@ -339,11 +339,11 @@ const App: React.FC = () => {
       {/* Main Content */}
       <div
         inert={showHelp || deleteDocId !== null}
-        className="flex-1 flex flex-col min-w-0 bg-gray-50 dark:bg-gray-900 transition-all duration-300 relative"
+        className="flex-1 flex flex-col min-w-0 bg-gray-50 dark:bg-[#191919] transition-all duration-300 relative"
       >
         {/* Top Bar - Fades out when typing */}
         <div
-          className={`h-14 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between px-4 bg-white dark:bg-gray-900 z-20 flex-shrink-0 transition-opacity duration-700 ease-in-out ${isTyping ? 'opacity-0 pointer-events-none delay-200' : 'opacity-100 delay-0'}`}
+          className={`absolute inset-x-0 top-0 h-14 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between px-4 bg-white dark:bg-gray-900 z-20 transition-opacity duration-700 ease-in-out ${isTyping ? 'opacity-0 pointer-events-none delay-200' : 'opacity-100 delay-0'}`}
           onFocusCapture={() => setIsTyping(false)}
         >
           <div className="flex items-center gap-4">
@@ -489,7 +489,7 @@ const App: React.FC = () => {
         {storageError && (
           <div
             role="alert"
-            className="px-4 py-2 text-sm bg-yellow-100 text-yellow-900 dark:bg-yellow-900 dark:text-yellow-100"
+            className="relative z-30 mt-14 flex-shrink-0 px-4 py-2 text-sm bg-yellow-100 text-yellow-900 dark:bg-yellow-900 dark:text-yellow-100"
           >
             {storageError}
           </div>

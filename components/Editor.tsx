@@ -735,7 +735,7 @@ export const Editor: React.FC<EditorProps> = ({
     <div className="relative w-full h-full overflow-hidden bg-gray-50 dark:bg-[#191919] transition-colors">
       {/* Suggestion Card */}
       {activeMatch && (
-        <div className="absolute top-6 right-8 z-50 w-72 p-4 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 animate-fade-in-up pointer-events-none">
+        <div className="absolute top-20 right-8 z-50 w-72 p-4 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 animate-fade-in-up pointer-events-none">
           <div className="flex items-center gap-2 mb-2">
             <div
               className={`w-2 h-2 rounded-full ${

@@ -81,7 +81,7 @@ export const Preview: React.FC<PreviewProps> = ({ content, focusMode, focusLine 
   const normalized = useMemo(() => normalizeMarkdownForNestedLists(content), [content]);
 
   return (
-    <div className="h-full overflow-y-auto px-8 pt-12 pb-8 bg-white dark:bg-gray-900 transition-colors">
+    <div className="h-full overflow-y-auto px-8 pt-12 md:pt-[6.5rem] pb-8 bg-white dark:bg-gray-900 transition-colors">
       <article className="w0-prose prose prose-lg dark:prose-invert prose-headings:font-sans prose-p:font-sans prose-a:text-blue-600 mx-auto prose-code:before:content-none prose-code:after:content-none [&_blockquote_p]:before:content-none [&_blockquote_p]:after:content-none">
         <FocusLineContext.Provider value={focusMode ? focusLine : null}>
           <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
